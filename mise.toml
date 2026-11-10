@@ -40,3 +40,7 @@ run = "cargo run -q -- render examples/tour.tsch -o out/tour --scale 12"
 [tasks.spec]
 description = "Print the text schematic format specification"
 run = "cargo run -q -- spec"
+
+[tasks.install]
+description = "Link bin/tsch into ~/.local/bin so tsch runs from any directory (it rebuilds itself when the source changed)"
+run = "ln -sf {{config_root}}/bin/tsch ~/.local/bin/tsch"

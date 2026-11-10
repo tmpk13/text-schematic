@@ -92,6 +92,17 @@ are from kicad-cli 10.0.8 plots.
 
 ## Tooling
 
+- `tsch` on PATH is `bin/tsch`, a launcher that runs `cargo build` inside
+  this checkout and then the debug binary from the caller's directory. An
+  installed copy would lag the source the skill documents, and
+  `cargo run --manifest-path` from another project lets that project's
+  rust-toolchain file choose the compiler.
+- The skill that makes tsch Claude's default drawing method is
+  `kicad-schematic` in claude-setup's pcb plugin. It defers the format to
+  `tsch spec` and the commands to `--help`, and names the gates (check,
+  netlist, verify, kicad-vis lint, render); change it when a gate or the
+  install changes.
+
 - inkscape aborts on this GNOME setup (`org.gnome.settings-daemon.plugins.
   xsettings` has no key `antialiasing`) when it can reach the display;
   `render` runs it with `DISPLAY` and `WAYLAND_DISPLAY` removed.
