@@ -267,12 +267,26 @@ impl Project {
             let (text, _) = kicad::write_sheet(s, &ctx);
             put(dir.join(self.root_file()), &text, &mut written)?;
         } else {
+            // Root page: the smallest paper whose grid of 63.5 x 15.24 mm
+            // blocks (88.9 x 30.48 mm pitch) holds every sheet clear of the
+            // title block.
+            let n = self.sheets.len();
+            let (root_paper, per_row) = kicad::PAPERS
+                .iter()
+                .map(|p| {
+                    let cols = ((p.w - 25.4 - 20.0) / 88.9).floor().max(1.0) as usize;
+                    let rows = ((p.h - 45.0 - 30.48) / 30.48).floor().max(1.0) as usize;
+                    (*p, cols, rows)
+                })
+                .find(|(_, c, r)| c * r >= n)
+                .map(|(p, c, _)| (p, c))
+                .ok_or_else(|| format!("{n} sheets do not fit on one root page"))?;
             let mut blocks = Vec::new();
             for (i, sf) in self.sheets.iter().enumerate() {
                 let s = &sf.sheet;
                 let block = uuid(&format!("block/{}/{}", self.name, s.name));
                 let file = format!("{}.kicad_sch", s.name);
-                let (col, row) = ((i % 3) as f64, (i / 3) as f64);
+                let (col, row) = ((i % per_row) as f64, (i / per_row) as f64);
                 let xy = (25.4 + col * 88.9, 30.48 + row * 30.48);
                 blocks.push(kicad::sheet_block(&self.name, &root_uuid, &block, &s.name, &file, i + 2, xy, (63.5, 15.24)));
                 let paper = kicad::choose_paper(s)?;
@@ -305,7 +319,7 @@ impl Project {
                 sheet_uuid: root_uuid.clone(),
                 path: format!("/{root_uuid}"),
                 pwr_start: 0,
-                paper: kicad::PAPERS[0],
+                paper: root_paper,
                 page: "1".into(),
                 extra: blocks,
                 is_root: true,
