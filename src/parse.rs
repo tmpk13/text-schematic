@@ -96,9 +96,24 @@ pub fn is_power_name(name: &str, extra: &[String]) -> bool {
 }
 
 fn is_reference(s: &str) -> bool {
+    split_reference(s).is_some()
+}
+
+/// `U12` -> ("U12", None); `U12B` -> ("U12", Some(2)): capital letters,
+/// digits, and an optional unit letter.
+pub fn split_reference(s: &str) -> Option<(String, Option<u32>)> {
     let b = s.as_bytes();
     let letters = b.iter().take_while(|c| c.is_ascii_uppercase() || **c == b'_').count();
-    letters > 0 && letters < b.len() && b[letters..].iter().all(|c| c.is_ascii_digit())
+    let digits = b[letters..].iter().take_while(|c| c.is_ascii_digit()).count();
+    if letters == 0 || digits == 0 {
+        return None;
+    }
+    let end = letters + digits;
+    match &b[end..] {
+        [] => Some((s.to_string(), None)),
+        [u] if u.is_ascii_uppercase() => Some((s[..end].to_string(), Some((u - b'A') as u32 + 1))),
+        _ => None,
+    }
 }
 
 struct Parser<'a> {
@@ -1171,17 +1186,21 @@ impl<'a> Parser<'a> {
                 self.err("E152", body_cell, format!("{desc} has no reference")).note(hint);
                 continue;
             }
-            let reference = ph[0].text.clone();
+            let drawn_ref = ph[0].text.clone();
             let ref_cell = (ph[0].row, ph[0].c0);
-            if !is_reference(&reference) {
+            let Some((reference, unit)) = split_reference(&drawn_ref) else {
                 let desc = self.body_desc(bi);
-                self.err("E153", ref_cell, format!("'{reference}' is the first field of {desc}; the first field must be a reference like R1 or U3"))
+                self.err("E153", ref_cell, format!("'{drawn_ref}' is the first field of {desc}; the first field must be a reference like R1 or U3"))
                     .note("fields read top to bottom: reference, value, then the names in visible = [...]");
                 continue;
+            };
+            if unit.is_some() && !matches!(body.kind, BodyKind::Box { .. }) {
+                self.err("E163", ref_cell, format!("{drawn_ref}: a unit letter belongs on a box (one unit of a part drawn as several boxes)"));
+                continue;
             }
-            if let Some(prev) = refs.insert(reference.clone(), ref_cell) {
+            if let Some(prev) = refs.insert(drawn_ref.clone(), ref_cell) {
                 let pp = self.pos(prev);
-                self.err("E154", ref_cell, format!("reference {reference} is used twice (also at {pp})"));
+                self.err("E154", ref_cell, format!("reference {drawn_ref} is used twice (also at {pp})"));
                 continue;
             }
             let meta = self.meta.part_meta(&reference);
@@ -1236,7 +1255,8 @@ impl<'a> Parser<'a> {
                     .cloned()
                     .unwrap_or_else(|| "passive".to_string());
             }
-            for k in meta.pins.keys() {
+            // For units the check runs over all units of the part, in project.rs.
+            for k in meta.pins.keys().filter(|_| unit.is_none()) {
                 if !pins.iter().any(|p| &p.number == k || &p.name == k) {
                     self.warn("W157", ref_cell, format!("{reference}: pins.{k} in the header matches no pin number or name"));
                 }
@@ -1294,6 +1314,7 @@ impl<'a> Parser<'a> {
             self.body_part[bi] = Some(parts.len());
             parts.push(Part {
                 reference,
+                unit,
                 kind,
                 shape_name,
                 origin: body.origin,
@@ -1307,8 +1328,9 @@ impl<'a> Parser<'a> {
                 col: (body_cell.1 + 1) as usize,
             });
         }
+        let bases: std::collections::HashSet<String> = parts.iter().map(|p| p.reference.clone()).collect();
         for r in self.meta.part.keys() {
-            if !refs.contains_key(r) {
+            if !bases.contains(r) {
                 self.d.push(Diag::warning("W162", self.src.header_line, 1, format!("part {r} is in the header but not drawn")));
             }
         }

@@ -18,6 +18,7 @@ description = "Check every example drawing"
 run = """
 cargo run -q -- check examples/ldo.tsch
 cargo run -q -- check examples/tour.tsch
+cargo run -q -- check examples/opamp.tsch
 cargo run -q -- check examples/usb/project.toml
 """
 
@@ -26,6 +27,7 @@ description = "Build every example into out/ and prove it with kicad-cli (netlis
 run = """
 cargo run -q -- verify examples/ldo.tsch -o out/ldo
 cargo run -q -- verify examples/tour.tsch -o out/tour
+cargo run -q -- verify examples/opamp.tsch -o out/opamp
 cargo run -q -- verify examples/usb/project.toml -o out/usb
 """
 

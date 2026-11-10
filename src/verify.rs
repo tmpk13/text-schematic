@@ -331,7 +331,9 @@ fn wanted(s: &Sheet) -> Vec<Want> {
     for p in &s.parts {
         for f in &p.fields {
             if let Some((r, c)) = f.at {
-                v.push(Want { text: f.value.clone(), cells: span(r, c, f.value.len()), what: format!("{} {}", p.reference, f.name) });
+                // KiCad shows a unit's reference with its letter (U1A).
+                let text = if f.name == "Reference" { p.shown_reference() } else { f.value.clone() };
+                v.push(Want { cells: span(r, c, text.len()), text, what: format!("{} {}", p.shown_reference(), f.name) });
             }
         }
         for t in &p.texts {

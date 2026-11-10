@@ -1,0 +1,17 @@
++++
+title = "Dual op-amp as three units"
+
+[part.U1]
+footprint = "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"
+pins = { 8 = "power_in", 4 = "power_in", 1 = "output", 7 = "output" }
++++
+     U1A                      U1B                          +5V
+     LM358                    LM358                         |
+     +--------+               +--------+                   8|
+[A]-3|+       |          [C]-5|+       |              +---------+
+     |     OUT|1-[X]          |     OUT|7-[Y]     U1C |   V+    |
+[B]-2|-       |          [D]-6|-       |        LM358 |   V-    |
+     +--------+               +--------+              +---------+
+                                                           4|
+                                                            |
+                                                           GND

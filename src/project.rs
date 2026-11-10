@@ -101,13 +101,58 @@ impl Project {
 
     fn cross_checks(&mut self) {
         let mut refs: BTreeMap<String, String> = BTreeMap::new();
+        // Units of each multi-unit part: unit -> sheet, and its pin numbers.
+        let mut units: BTreeMap<String, BTreeMap<u32, String>> = BTreeMap::new();
+        let mut single: BTreeSet<String> = BTreeSet::new();
+        let mut pins: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
         for s in &self.sheets {
             for p in &s.sheet.parts {
-                if let Some(other) = refs.insert(p.reference.clone(), s.sheet.name.clone()) {
+                let shown = p.shown_reference();
+                if let Some(other) = refs.insert(shown.clone(), s.sheet.name.clone()) {
                     if other != s.sheet.name {
-                        self.diags.push(Diag::error("E181", 0, 0, format!("reference {} is on sheets {other} and {}", p.reference, s.sheet.name)));
+                        self.diags.push(Diag::error("E181", 0, 0, format!("reference {shown} is on sheets {other} and {}", s.sheet.name)));
                     }
                 }
+                match p.unit {
+                    Some(u) => {
+                        units.entry(p.reference.clone()).or_default().insert(u, s.sheet.name.clone());
+                        for pin in &p.pins {
+                            if let Some(prev) = pins.entry(p.reference.clone()).or_default().insert(pin.number.clone(), shown.clone()) {
+                                if prev != shown {
+                                    self.diags.push(Diag::error("E183", 0, 0, format!("pin {} of {} is on units {prev} and {shown}", pin.number, p.reference)));
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        single.insert(p.reference.clone());
+                    }
+                }
+            }
+        }
+        for base in units.keys() {
+            let all: Vec<&crate::model::Part> =
+                self.sheets.iter().flat_map(|s| s.sheet.parts.iter()).filter(|p| &p.reference == base && p.unit.is_some()).collect();
+            let keys: BTreeSet<&String> = all.iter().flat_map(|p| p.meta.pins.keys()).collect();
+            for k in keys {
+                if !all.iter().any(|q| q.pins.iter().any(|pin| &pin.number == k || &pin.name == k)) {
+                    self.diags.push(Diag::warning("W186", 0, 0, format!("{base}: pins.{k} in the header matches no pin of any unit")));
+                }
+            }
+            for p in &all {
+                if p.value() != all[0].value() || p.meta.footprint != all[0].meta.footprint {
+                    self.diags.push(Diag::error("E187", 0, 0, format!("units {} and {} of {base} differ in value or footprint", all[0].shown_reference(), p.shown_reference())));
+                }
+            }
+        }
+        for (base, us) in &units {
+            if single.contains(base) {
+                self.diags.push(Diag::error("E184", 0, 0, format!("{base} is drawn both as a whole part and as units ({base}A...)")));
+            }
+            let n = *us.keys().max().unwrap();
+            if us.len() as u32 != n {
+                let have: Vec<String> = us.keys().map(|u| format!("{base}{}", (b'A' + (*u - 1) as u8) as char)).collect();
+                self.diags.push(Diag::error("E185", 0, 0, format!("units of {base} must run from A without gaps; drawn: {}", have.join(", "))));
             }
         }
         if self.sheets.len() > 1 {

@@ -129,6 +129,9 @@ pub enum PartKind {
 #[derive(Clone, Debug)]
 pub struct Part {
     pub reference: String,
+    /// Unit of a multi-unit part (1 for the drawn reference U1A, 2 for
+    /// U1B...); None for a part drawn once.
+    pub unit: Option<u32>,
     pub kind: PartKind,
     /// Short name of the drawing, used to name the library symbol.
     pub shape_name: String,
@@ -149,6 +152,14 @@ pub struct Part {
 impl Part {
     pub fn field(&self, name: &str) -> Option<&Field> {
         self.fields.iter().find(|f| f.name == name)
+    }
+
+    /// The reference as KiCad shows it: U1, or U1A for unit 1 of several.
+    pub fn shown_reference(&self) -> String {
+        match self.unit {
+            Some(u) => format!("{}{}", self.reference, (b'A' + (u - 1) as u8) as char),
+            None => self.reference.clone(),
+        }
     }
 
     pub fn value(&self) -> &str {

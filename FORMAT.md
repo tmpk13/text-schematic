@@ -81,6 +81,11 @@ with a column ruler.
   bottom pin's name is in the row just inside the edge, covering the pin's
   column. Names are optional; other text inside the box (indented by a
   space) is drawn as is.
+- A part drawn as several boxes (the halves of a dual op-amp, the blocks
+  of a large MCU, possibly on different sheets) gives each box the
+  reference with a unit letter: `U1A`, `U1B`, ... from A without gaps. KiCad
+  shows the reference the same way. Pin numbers are unique across the units;
+  the header entry is `[part.U1]`.
 - Pin numbers in one box are unique. Pin electrical types default to
   passive; set them in the header (`pins = { 1 = "power_in", VOUT = "power_out" }`).
 
@@ -128,7 +133,8 @@ also count, but only when the line touches no other part more directly. A
 value line aligned directly under another part's field line is an error.
 
 Lines are read top to bottom, then left to right. The first is the
-reference (`R1`, `U3`, `LED2`: capital letters then digits), the second the
+reference (`R1`, `U3`, `LED2`: capital letters then digits, plus a unit
+letter on a box drawn as one of several units, `U1B`), the second the
 value, the rest are named by the part's `visible = [...]` list (default
 `["MPN"]`). Every part needs a drawn reference. A line next to two parts is
 an error; a reference goes to a glyph whose letter matches (R, C, L, D...)

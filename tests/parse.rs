@@ -408,3 +408,22 @@ fn text_under_a_part_beats_a_pin_stub_row() {
     let d3 = s.parts.iter().find(|p| p.reference == "D3").unwrap();
     assert_eq!(d3.value(), "BZX5V1");
 }
+
+#[test]
+fn units_share_a_reference() {
+    let t = std::fs::read_to_string("examples/opamp.tsch").unwrap();
+    let (s, d) = parse_text(&t);
+    assert!(!d.has_errors(), "{:#?}", d.items);
+    let shown: Vec<String> = s.parts.iter().map(|p| p.shown_reference()).collect();
+    assert_eq!(shown, vec!["U1A", "U1B", "U1C"]);
+    assert!(s.parts.iter().all(|p| p.reference == "U1"));
+}
+
+#[test]
+fn unit_letters_only_on_boxes() {
+    let t = r"
+     R1A
+[A]--[==]--[B]
+";
+    assert!(codes(t).contains(&"E163"), "{:?}", codes(t));
+}

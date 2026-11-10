@@ -205,11 +205,11 @@ pub fn sym_text_anchor(t: &SymText) -> (f64, f64, f64, f64, Option<&'static str>
     }
 }
 
-/// The body of a library symbol (graphics, texts, pins), without its name,
-/// used both to write it and to find identical drawings.
-fn symbol_units(part: &Part, unit_name: &str) -> (S, S) {
+/// One unit of a library symbol: graphics, texts and pins relative to the
+/// unit's origin cell, in sub-symbol `{name}_{unit}_1`.
+fn unit_body(part: &Part, name: &str, unit: u32) -> S {
     let (ox, oy) = (x(part.origin.1), y(part.origin.0));
-    let mut g: Vec<S> = vec![q(format!("{unit_name}_0_1"))];
+    let mut g: Vec<S> = vec![q(format!("{name}_{unit}_1"))];
     for s in &part.shapes {
         g.push(shape_sexpr(s));
     }
@@ -217,30 +217,36 @@ fn symbol_units(part: &Part, unit_name: &str) -> (S, S) {
         let (ax, ay, h, w, j) = sym_text_anchor(t);
         g.push(sx!("text", q(t.text.clone()), at(ax - ox, -(ay - oy), 0.0), effects(h, w, j)));
     }
-    let mut p: Vec<S> = vec![q(format!("{unit_name}_1_1"))];
     for pin in &part.pins {
         let tx = x(pin.tip.1) - ox;
         let ty = -(y(pin.tip.0) - oy);
-        let name = if pin.name.is_empty() { "~".to_string() } else { pin.name.clone() };
-        p.push(sx!(
+        let pname = if pin.name.is_empty() { "~".to_string() } else { pin.name.clone() };
+        g.push(sx!(
             "pin",
             pin.etype.as_str(),
             "line",
             at(tx, ty, pin_angle(pin.dir)),
             sx!("length", pin.length),
-            sx!("name", q(name), effects(FONT_H, FONT_W, None)),
+            sx!("name", q(pname), effects(FONT_H, FONT_W, None)),
             sx!("number", q(pin.number.clone()), effects(SMALL, SMALL, None))
         ));
     }
-    (crate::sexpr::list("symbol", g), crate::sexpr::list("symbol", p))
+    crate::sexpr::list("symbol", g)
 }
 
-fn lib_symbol(name: &str, part: &Part) -> S {
-    let (g, p) = symbol_units(part, name);
-    let refp: String = part.reference.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+/// Text identifying a drawing, for sharing one symbol between identical
+/// parts.
+fn body_key(units: &[&Part]) -> String {
+    units.iter().enumerate().map(|(i, p)| unit_body(p, "X", i as u32 + 1).to_text()).collect()
+}
+
+/// A library symbol from its units in order (one part for a part drawn
+/// once).
+fn lib_symbol(name: &str, units: &[&Part]) -> S {
+    let first = units[0];
+    let refp: String = first.reference.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
     let eff = || effects(FONT_H, FONT_W, None);
-    sx!(
-        "symbol",
+    let mut v = vec![
         q(format!("{LIB}:{name}")),
         sx!("pin_numbers", sx!("hide", "yes")),
         sx!("pin_names", sx!("offset", 0.0), sx!("hide", "yes")),
@@ -252,10 +258,12 @@ fn lib_symbol(name: &str, part: &Part) -> S {
         prop("Footprint", "", 0.0, 0.0, true, eff()),
         prop("Datasheet", "", 0.0, 0.0, true, eff()),
         prop("Description", "", 0.0, 0.0, true, eff()),
-        g,
-        p,
-        sx!("embedded_fonts", "no")
-    )
+    ];
+    for (i, p) in units.iter().enumerate() {
+        v.push(unit_body(p, name, i as u32 + 1));
+    }
+    v.push(sx!("embedded_fonts", "no"));
+    crate::sexpr::list("symbol", v)
 }
 
 fn sanitize(s: &str) -> String {
@@ -278,16 +286,52 @@ pub struct Library {
 impl Library {
     pub fn build(sheets: &[&Sheet]) -> Library {
         let mut lib = Library::default();
-        let all: Vec<(usize, usize, &Part)> = sheets
-            .iter()
-            .enumerate()
-            .flat_map(|(si, s)| s.parts.iter().enumerate().map(move |(pi, p)| (si, pi, p)))
-            .collect();
-        let parts: Vec<&Part> = all.iter().map(|x| x.2).collect();
-        let names = symbol_names(&parts);
-        for ((si, pi, part), name) in all.iter().zip(names) {
-            lib.symbols.entry(name.clone()).or_insert_with(|| lib_symbol(&name, part));
-            lib.names.insert((*si, *pi), name);
+        // Group: a part drawn once is its own group; the units of a
+        // multi-unit part (on any sheet) form one group, in unit order.
+        let mut groups: BTreeMap<String, Vec<(usize, usize, u32)>> = BTreeMap::new();
+        let mut order: Vec<String> = Vec::new();
+        for (si, s) in sheets.iter().enumerate() {
+            for (pi, p) in s.parts.iter().enumerate() {
+                let key = match p.unit {
+                    Some(_) => format!("unit:{}", p.reference),
+                    None => format!("one:{si}:{pi}"),
+                };
+                if !groups.contains_key(&key) {
+                    order.push(key.clone());
+                }
+                groups.entry(key).or_default().push((si, pi, p.unit.unwrap_or(1)));
+            }
+        }
+        let mut by_body: BTreeMap<String, String> = BTreeMap::new();
+        let mut used: BTreeMap<String, String> = BTreeMap::new();
+        for key in order {
+            let mut members = groups[&key].clone();
+            members.sort_by_key(|m| m.2);
+            let parts: Vec<&Part> = members.iter().map(|&(si, pi, _)| &sheets[si].parts[pi]).collect();
+            let body = body_key(&parts);
+            let name = match by_body.get(&body) {
+                Some(n) => n.clone(),
+                None => {
+                    let first = parts[0];
+                    let base = match first.kind {
+                        PartKind::Box => sanitize(if first.value().is_empty() { &first.reference } else { first.value() }),
+                        PartKind::Glyph(_) => first.shape_name.clone(),
+                    };
+                    let mut name = base.clone();
+                    let mut k = 2;
+                    while used.get(&name).is_some_and(|other| other != &body) {
+                        name = format!("{base}_{k}");
+                        k += 1;
+                    }
+                    used.insert(name.clone(), body.clone());
+                    by_body.insert(body, name.clone());
+                    lib.symbols.insert(name.clone(), lib_symbol(&name, &parts));
+                    name
+                }
+            };
+            for &(si, pi, _) in &members {
+                lib.names.insert((si, pi), name.clone());
+            }
         }
         for s in sheets {
             for p in &s.ports {
@@ -328,36 +372,6 @@ fn strip_lib(s: &S) -> S {
 }
 
 pub const SYM_LIB_TABLE: &str = "(sym_lib_table\n\t(version 7)\n\t(lib (name \"tsch\") (type \"KiCad\") (uri \"${KIPRJMOD}/tsch.kicad_sym\") (options \"\") (descr \"Symbols generated by tsch\"))\n)\n";
-
-/// Library symbol names per part, sharing one symbol between identical
-/// drawings.
-pub fn symbol_names(parts: &[&Part]) -> Vec<String> {
-    let mut by_body: BTreeMap<String, String> = BTreeMap::new();
-    let mut used: BTreeMap<String, String> = BTreeMap::new();
-    let mut out = Vec::new();
-    for part in parts {
-        let (g, p) = symbol_units(part, "X");
-        let key = format!("{}{}", g.to_text(), p.to_text());
-        if let Some(n) = by_body.get(&key) {
-            out.push(n.clone());
-            continue;
-        }
-        let base = match part.kind {
-            PartKind::Box => sanitize(if part.value().is_empty() { &part.reference } else { part.value() }),
-            PartKind::Glyph(_) => part.shape_name.clone(),
-        };
-        let mut name = base.clone();
-        let mut k = 2;
-        while used.get(&name).is_some_and(|other| other != &key) {
-            name = format!("{base}_{k}");
-            k += 1;
-        }
-        used.insert(name.clone(), key.clone());
-        by_body.insert(key, name.clone());
-        out.push(name);
-    }
-    out
-}
 
 fn power_name(p: &Port) -> String {
     format!("PWR_{}_{}", if p.side == Dir::U { "UP" } else { "DN" }, sanitize(&p.name))
@@ -432,10 +446,10 @@ pub struct SheetCtx<'a> {
     pub is_root: bool,
 }
 
-fn instances(ctx: &SheetCtx, reference: &str) -> S {
+fn instances(ctx: &SheetCtx, reference: &str, unit: u32) -> S {
     sx!(
         "instances",
-        sx!("project", q(ctx.project), sx!("path", q(ctx.path.clone()), sx!("reference", q(reference)), sx!("unit", 1.0)))
+        sx!("project", q(ctx.project), sx!("path", q(ctx.path.clone()), sx!("reference", q(reference)), sx!("unit", unit as f64)))
     )
 }
 
@@ -538,13 +552,13 @@ pub fn write_sheet(sheet: &Sheet, ctx: &SheetCtx) -> (String, usize) {
         let mut v: Vec<S> = vec![
             sx!("lib_id", q(format!("{LIB}:{name}"))),
             at(ox, oy, 0.0),
-            sx!("unit", 1.0),
+            sx!("unit", part.unit.unwrap_or(1) as f64),
             sx!("exclude_from_sim", "no"),
             sx!("in_bom", yes(part.meta.in_bom.unwrap_or(true))),
             sx!("on_board", yes(part.meta.on_board.unwrap_or(true))),
             sx!("dnp", yes(part.meta.dnp.unwrap_or(false))),
             sx!("fields_autoplaced", "no"),
-            sx!("uuid", q(key(&format!("part/{}", part.reference)))),
+            sx!("uuid", q(key(&format!("part/{}", part.shown_reference())))),
         ];
         for f in &part.fields {
             match f.at {
@@ -555,7 +569,7 @@ pub fn write_sheet(sheet: &Sheet, ctx: &SheetCtx) -> (String, usize) {
         for pin in &part.pins {
             v.push(sx!("pin", q(pin.number.clone()), sx!("uuid", q(key(&format!("pin/{}/{}", part.reference, pin.number))))));
         }
-        v.push(instances(ctx, &part.reference));
+        v.push(instances(ctx, &part.reference, part.unit.unwrap_or(1)));
         items.push(crate::sexpr::list("symbol", v));
     }
     // Power ports, numbered in reading order.
@@ -582,7 +596,7 @@ pub fn write_sheet(sheet: &Sheet, ctx: &SheetCtx) -> (String, usize) {
             prop("Datasheet", "", ax, ay, true, eff()),
             prop("Description", "", ax, ay, true, eff()),
             sx!("pin", q("1"), sx!("uuid", q(key(&format!("pwrpin/{:?}", p.anchor))))),
-            instances(ctx, &reference)
+            instances(ctx, &reference, 1)
         ));
     }
     items.extend(ctx.extra.iter().cloned());

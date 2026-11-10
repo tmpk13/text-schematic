@@ -32,6 +32,11 @@ fn tour_round_trip() {
 }
 
 #[test]
+fn units_round_trip() {
+    round_trip("examples/opamp.tsch", "opamp");
+}
+
+#[test]
 fn hierarchy_round_trip() {
     round_trip("examples/usb/project.toml", "usb");
 }
