@@ -1,0 +1,38 @@
+# tsch: text schematics to KiCad. Debug builds; kicad-cli (KiCad 10) is
+# needed for verify and render, inkscape for render.
+
+[tasks.build]
+description = "Build tsch"
+run = "cargo build"
+
+[tasks.test]
+description = "Run the unit and integration tests (the KiCad round trip is skipped without kicad-cli)"
+run = "cargo test"
+
+[tasks.tsch]
+description = "Run tsch with arguments, e.g. mise run tsch -- check file.tsch"
+run = "cargo run -q --"
+
+[tasks.check]
+description = "Check every example drawing"
+run = """
+cargo run -q -- check examples/ldo.tsch
+cargo run -q -- check examples/tour.tsch
+cargo run -q -- check examples/usb/project.toml
+"""
+
+[tasks.verify]
+description = "Build every example into out/ and prove it with kicad-cli (netlist, ERC, text placement)"
+run = """
+cargo run -q -- verify examples/ldo.tsch -o out/ldo
+cargo run -q -- verify examples/tour.tsch -o out/tour
+cargo run -q -- verify examples/usb/project.toml -o out/usb
+"""
+
+[tasks.render]
+description = "Render the feature tour to out/tour/*.png"
+run = "cargo run -q -- render examples/tour.tsch -o out/tour --scale 12"
+
+[tasks.spec]
+description = "Print the text schematic format specification"
+run = "cargo run -q -- spec"

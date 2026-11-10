@@ -375,3 +375,36 @@ value = "2k"
 "#;
     assert!(codes(t).contains(&"E158"));
 }
+
+#[test]
+fn value_under_another_parts_reference_is_refused() {
+    // "100n" is stacked under C1's reference but sits beside C2's body.
+    let t = r"
+ +5V        +5V
+  |          |
+ ===  C1     +
+  |   100n  ===  C2
+ GND         |   10u
+            GND
+";
+    let c = codes(t);
+    assert!(c.contains(&"E156") || c.contains(&"E151"), "{c:?}");
+}
+
+#[test]
+fn text_under_a_part_beats_a_pin_stub_row() {
+    // BZX5V1 is under the diode and two columns from the capacitor's stub row.
+    let wire = "[A]-*---|<---[B]";
+    let t = format!(
+        "{}\n{wire}\n{}\n{}\n{}\n",
+        row(&[(8, "D3")]),
+        row(&[(4, "|"), (7, "BZX5V1")]),
+        row(&[(3, "==="), (8, "C7")]),
+        row(&[(4, "|"), (8, "10u")])
+    );
+    let t = format!("{t}{}\n", row(&[(3, "GND")]));
+    let (s, d) = parse_text(&t);
+    assert!(!d.has_errors(), "{:#?}\n{t}", d.items);
+    let d3 = s.parts.iter().find(|p| p.reference == "D3").unwrap();
+    assert_eq!(d3.value(), "BZX5V1");
+}

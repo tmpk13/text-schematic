@@ -649,7 +649,11 @@ pub fn project_json(existing: Option<&str>, file_name: &str) -> String {
     serde_json::to_string_pretty(&v).unwrap() + "\n"
 }
 
-pub const LABEL_SIZE_RATIO: f64 = 0.375;
+/// Margin of a global label's flag around its name, as a fraction of the
+/// font width (KiCad sizes the flag from the width). 0.25 keeps the flags
+/// of labels on adjacent rows 0.16 mm apart; the default 0.375 overlaps
+/// them.
+pub const LABEL_SIZE_RATIO: f64 = 0.25;
 pub const TEXT_OFFSET_RATIO: f64 = 0.15;
 
 /// For messages: "x, y" of a cell in mm.

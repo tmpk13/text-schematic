@@ -83,8 +83,20 @@ impl Diags {
                 if let Some(src) = source_lines.get(d.line - 1) {
                     let num = d.line.to_string();
                     let pad = " ".repeat(num.len());
-                    let _ = writeln!(out, "{num} | {src}");
-                    let caret = " ".repeat(d.col.saturating_sub(1));
+                    // Wide drawings: show a window around the column, with
+                    // the window's first column so positions stay readable.
+                    let col = d.col.saturating_sub(1);
+                    let (start, text) = if src.len() > 100 {
+                        let a = col.saturating_sub(40).min(src.len().saturating_sub(80));
+                        (a, &src[a..(a + 80).min(src.len())])
+                    } else {
+                        (0, *src)
+                    };
+                    if start > 0 {
+                        let _ = writeln!(out, "{pad} | (from column {})", start + 1);
+                    }
+                    let _ = writeln!(out, "{num} | {text}");
+                    let caret = " ".repeat(col - start);
                     let _ = writeln!(out, "{pad} | {caret}^");
                 }
             }

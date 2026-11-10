@@ -5,7 +5,7 @@
 //! 3. The plotted SVG: every text lands inside the cells it was drawn in,
 //!    no two texts overlap, and no line passes through a text.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -349,8 +349,12 @@ fn wanted(s: &Sheet) -> Vec<Want> {
     for l in &s.labels {
         let n = l.name.len();
         let cells = if l.global {
-            let c0 = if l.side == Dir::R { l.text_at.1 + 1 } else { l.text_at.1 + 1 };
-            span(l.text_at.0, c0, n)
+            // The flag spans from the center of `[` to the center of `]`;
+            // the name may start inside the `[` cell.
+            let mut sp = span(l.text_at.0, l.text_at.1, n + 2);
+            sp.0 = x(l.text_at.1);
+            sp.2 = x(l.text_at.1 + n as i32 + 1);
+            sp
         } else {
             let mut sp = span(l.text_at.0, l.text_at.1, n);
             // A label's text starts at its anchor, inside the wire's end cell.
@@ -420,13 +424,18 @@ fn check_texts(sheet: &Sheet, plot: &Plot) -> TextReport {
     let mut matched: Vec<(usize, &Want)> = Vec::new();
     let mut problems = Vec::new();
     let mut worst: f64 = 0.0;
+    let mut by_text: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (i, t) in plot.texts.iter().enumerate() {
+        by_text.entry(t.text.as_str()).or_default().push(i);
+    }
     for w in &wants {
         let (cx, cy) = ((w.cells.0 + w.cells.2) / 2.0, (w.cells.1 + w.cells.3) / 2.0);
-        let best = plot
-            .texts
-            .iter()
-            .enumerate()
-            .filter(|(i, t)| !used[*i] && t.text == w.text)
+        let best = by_text
+            .get(w.text.as_str())
+            .into_iter()
+            .flatten()
+            .map(|&i| (i, &plot.texts[i]))
+            .filter(|(i, _)| !used[*i])
             .min_by(|a, b| {
                 let da = ((a.1.b.0 + a.1.b.2) / 2.0 - cx).hypot((a.1.b.1 + a.1.b.3) / 2.0 - cy);
                 let db = ((b.1.b.0 + b.1.b.2) / 2.0 - cx).hypot((b.1.b.1 + b.1.b.3) / 2.0 - cy);
@@ -449,19 +458,50 @@ fn check_texts(sheet: &Sheet, plot: &Plot) -> TextReport {
         }
         matched.push((i, w));
     }
-    for (k, &(i, wi)) in matched.iter().enumerate() {
-        for &(j, wj) in &matched[k + 1..] {
-            if overlap(plot.texts[i].b, plot.texts[j].b, 0.02) {
-                problems.push(format!("{} '{}' overlaps {} '{}'", wi.what, wi.text, wj.what, wj.text));
+    // Spatial buckets keep the pair checks near linear on large sheets.
+    const B: f64 = 5.0;
+    let key = |x: f64, y: f64| ((x / B).floor() as i64, (y / B).floor() as i64);
+    let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    for (m, &(i, _)) in matched.iter().enumerate() {
+        let b = plot.texts[i].b;
+        let (x0, y0) = key(b.0, b.1);
+        let (x1, y1) = key(b.2, b.3);
+        for gx in x0..=x1 {
+            for gy in y0..=y1 {
+                grid.entry((gx, gy)).or_default().push(m);
             }
         }
-        for &(p, q, half) in &plot.segs {
-            if seg_hits(p, q, half, plot.texts[i].b, 0.05) {
-                problems.push(format!(
-                    "a line from ({:.2},{:.2}) to ({:.2},{:.2}) crosses {} '{}'",
-                    p.0, p.1, q.0, q.1, wi.what, wi.text
-                ));
-                break;
+    }
+    let mut seen: HashSet<(usize, usize)> = HashSet::new();
+    for cell in grid.values() {
+        for (a, &ma) in cell.iter().enumerate() {
+            for &mb in &cell[a + 1..] {
+                let (lo, hi) = (ma.min(mb), ma.max(mb));
+                let (i, wi) = matched[lo];
+                let (j, wj) = matched[hi];
+                if overlap(plot.texts[i].b, plot.texts[j].b, 0.02) && seen.insert((lo, hi)) {
+                    problems.push(format!("{} '{}' overlaps {} '{}'", wi.what, wi.text, wj.what, wj.text));
+                }
+            }
+        }
+    }
+    let mut crossed: HashSet<usize> = HashSet::new();
+    for &(p, q, half) in &plot.segs {
+        let (x0, y0) = key(p.0.min(q.0) - half, p.1.min(q.1) - half);
+        let (x1, y1) = key(p.0.max(q.0) + half, p.1.max(q.1) + half);
+        for gx in x0..=x1 {
+            for gy in y0..=y1 {
+                let Some(cell) = grid.get(&(gx, gy)) else { continue };
+                for &m in cell {
+                    let (i, wi) = matched[m];
+                    if !crossed.contains(&m) && seg_hits(p, q, half, plot.texts[i].b, 0.05) {
+                        crossed.insert(m);
+                        problems.push(format!(
+                            "a line from ({:.2},{:.2}) to ({:.2},{:.2}) crosses {} '{}'",
+                            p.0, p.1, q.0, q.1, wi.what, wi.text
+                        ));
+                    }
+                }
             }
         }
     }

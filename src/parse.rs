@@ -901,14 +901,13 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if let Some(&(anchor, side)) = ends.first() {
+                // A bad name is reported once; the port still connects so the
+                // wire end is not reported too.
                 if !is_power_name(&p.text, &self.meta.power) {
                     self.err("E143", start, format!("'{}' sits on the end of a vertical wire, which makes it a power port, but it is not a rail name", p.text))
                         .note("power ports are rails (GND, +3V3, VCC...) or names listed in power = [...]; give a signal a label at a horizontal wire end, and keep fields off wire ends");
-                    continue;
-                }
-                if p.text.contains(' ') {
+                } else if p.text.contains(' ') {
                     self.err("E144", start, format!("power port name '{}' contains a space", p.text));
-                    continue;
                 }
                 let idx = self.ports.len();
                 self.ports.push(Port {
@@ -939,8 +938,8 @@ impl<'a> Parser<'a> {
         };
         if name.contains(' ') || name.contains('[') || name.contains(']') || name.is_empty() {
             self.err("E146", start, format!("label '{}' is not a valid net name", p.text))
-                .note("net names have no spaces; a global label is written [NAME] against the wire end");
-            return;
+                .note("net names have no spaces (two words one space apart are one text); a global label is written [NAME] against the wire end");
+            // Still connect it, so the wire is not reported a second time.
         }
         if !global && is_power_name(&name, &[]) && is_ground(&name) {
             self.warn("W147", start, format!("label '{name}' looks like a ground net"))
@@ -973,21 +972,25 @@ impl<'a> Parser<'a> {
         let mut orphans: Vec<usize> = Vec::new();
         for &pi in &cands {
             let p = self.phrases[pi].clone();
-            let near: Vec<usize> = (0..self.bodies.len())
-                .filter(|&bi| {
-                    let (mut t, l, mut b, r) = self.bodies[bi].bbox;
-                    // Beside a vertical glyph, its pin stub rows count too.
-                    if let BodyKind::Glyph(f) = self.bodies[bi].kind {
-                        if f.vertical() {
-                            t -= 1;
-                            b += 1;
-                        }
+            // Strength 2: touching the body's own rows or columns; 1: only
+            // beside a vertical glyph's pin stub rows. The strongest wins.
+            let strength = |bi: usize| -> u8 {
+                let (t, l, b, r) = self.bodies[bi].bbox;
+                let gr = gap(p.row, p.row, t, b);
+                let gc = gap(p.c0, p.c1, l, r);
+                if (gr < 0 && gc <= 2) || (gc < 0 && gr == 0) {
+                    return 2;
+                }
+                if let BodyKind::Glyph(f) = self.bodies[bi].kind {
+                    if f.vertical() && gap(p.row, p.row, t - 1, b + 1) < 0 && gc <= 2 {
+                        return 1;
                     }
-                    let gr = gap(p.row, p.row, t, b);
-                    let gc = gap(p.c0, p.c1, l, r);
-                    (gr < 0 && gc <= 2) || (gc < 0 && gr == 0)
-                })
-                .collect();
+                }
+                0
+            };
+            let scored: Vec<(usize, u8)> = (0..self.bodies.len()).map(|bi| (bi, strength(bi))).filter(|x| x.1 > 0).collect();
+            let best = scored.iter().map(|x| x.1).max().unwrap_or(0);
+            let near: Vec<usize> = scored.iter().filter(|x| x.1 == best).map(|x| x.0).collect();
             let mut cands_b = near.clone();
             // A reference goes to a part that takes its letter; a glyph of
             // that kind wins over a box.
