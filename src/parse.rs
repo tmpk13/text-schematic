@@ -273,10 +273,17 @@ impl<'a> Parser<'a> {
                     && (r + 1..r2).all(|rr| self.ch((rr, c2)) == b'|')
                     && self.ch((r2, c2)) == b'+'
                     && (c + 1..c2).all(|cc| self.ch((r2, cc)) == b'-');
-                if !closed {
-                    self.broken_box(r, c, c2);
-                    continue;
-                }
+                let r2 = if closed {
+                    r2
+                } else {
+                    // Report the broken side, then carry on as if the box
+                    // were closed so its pins and text do not each produce
+                    // a misleading error of their own.
+                    match self.broken_box(r, c, c2) {
+                        Some(r2) => r2,
+                        None => continue,
+                    }
+                };
                 if (r..=r2).any(|rr| (c..=c2).any(|cc| !self.free((rr, cc)))) {
                     self.err("E101", (r, c), "box overlaps another box").note("boxes may not nest or touch");
                     continue;
@@ -302,12 +309,12 @@ impl<'a> Parser<'a> {
     /// A top edge `+---+` with a matching bottom edge further down whose
     /// sides do not line up: report the first cell of the broken side,
     /// instead of the many wire and text errors the loose pieces cause.
-    fn broken_box(&mut self, r: i32, c: i32, c2: i32) {
+    fn broken_box(&mut self, r: i32, c: i32, c2: i32) -> Option<i32> {
         let h = self.g.height() as i32;
         let bottom = (r + 2..h.min(r + 80)).find(|&rr| {
             self.ch((rr, c)) == b'+' && self.ch((rr, c2)) == b'+' && (c + 1..c2).all(|cc| self.ch((rr, cc)) == b'-')
         });
-        let Some(r2) = bottom else { return };
+        let r2 = bottom?;
         for rr in r + 1..r2 {
             for cc in [c, c2] {
                 if self.ch((rr, cc)) != b'|' {
@@ -315,10 +322,11 @@ impl<'a> Parser<'a> {
                     let got = self.ch((rr, cc)) as char;
                     let hint = format!("the corners are at {} and {}; every row between them needs '|' in both corner columns", self.pos((r, c)), self.pos((r2, c2)));
                     self.err("E102", (rr, cc), format!("box outline broken: expected the {side} side '|' here, found '{got}'")).note(hint);
-                    return;
+                    return Some(r2);
                 }
             }
         }
+        None
     }
 
     /// A run of pin-number characters going outward from `start` in `dir`.
@@ -328,7 +336,7 @@ impl<'a> Parser<'a> {
         let mut c = start;
         loop {
             let ch = self.ch(c);
-            if ch == b' ' || WIRE_CHARS.contains(&ch) || !self.free(c) {
+            if !ch.is_ascii_alphanumeric() || !self.free(c) {
                 break;
             }
             cells.push(c);
@@ -454,6 +462,15 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 let cells = self.number_run((row, cc - 1), Dir::L);
+                // An x inside a word ("Conn_01x04" written above the box) is
+                // a letter, not an unused pin: the tip x stands alone on the
+                // right and its number starts after a space.
+                if tch == b'x' {
+                    let before = cells.first().map_or(b' ', |&f| self.ch((f.0, f.1 - 1)));
+                    if self.ch((row, cc + 1)).is_ascii_alphanumeric() || before != b' ' || cells.is_empty() {
+                        continue;
+                    }
+                }
                 if cells.is_empty() {
                     self.err("E114", tip, format!("'{}' meets the {} edge of the box but has no pin number", tch as char, if dir == Dir::U { "top" } else { "bottom" }))
                         .note("write the pin number immediately left of the pin, e.g. 5|");

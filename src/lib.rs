@@ -3,6 +3,7 @@
 
 pub mod boxgen;
 pub mod diag;
+pub mod edit;
 pub mod glyphs;
 pub mod kicad;
 pub mod meta;

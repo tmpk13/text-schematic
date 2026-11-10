@@ -50,6 +50,40 @@ enum Cmd {
         #[arg(long)]
         cols: Option<String>,
     },
+    /// List every run of non-space characters with its first column.
+    Tokens {
+        file: PathBuf,
+        /// File lines, e.g. 20:60.
+        #[arg(long)]
+        lines: Option<String>,
+    },
+    /// Insert spaces at a column (--by 3) or delete spaces there (--by -3)
+    /// on a line or a range of lines; refuses to delete anything but spaces.
+    Shift {
+        file: PathBuf,
+        /// Line or FIRST:LAST.
+        #[arg(long)]
+        lines: String,
+        #[arg(long)]
+        col: usize,
+        #[arg(long, allow_hyphen_values = true)]
+        by: i64,
+    },
+    /// Write text with its first character at LINE:COL; several lines with
+    /// \n in --text or from --from FILE. Spaces in the text leave the
+    /// drawing as it is; overwriting a different character needs --force.
+    Put {
+        file: PathBuf,
+        #[arg(long)]
+        at: String,
+        #[arg(long)]
+        text: Option<String>,
+        /// Read the text from a file instead.
+        #[arg(long = "from")]
+        from: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
     /// Build and plot each sheet to PNG (needs inkscape).
     Render {
         inputs: Vec<PathBuf>,
@@ -135,6 +169,19 @@ fn build(inputs: &[PathBuf], out: &PathBuf) -> Result<project::Project, ExitCode
     }
 }
 
+fn report(r: Result<String, String>) -> ExitCode {
+    match r {
+        Ok(s) => {
+            print!("{s}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.cmd {
@@ -210,6 +257,16 @@ fn main() -> ExitCode {
                     ExitCode::from(2)
                 }
             }
+        }
+        Cmd::Tokens { file, lines } => report(tsch::edit::tokens(&file, lines.as_deref())),
+        Cmd::Shift { file, lines, col, by } => report(tsch::edit::shift(&file, &lines, col, by).map(|m| m + "\n")),
+        Cmd::Put { file, at, text, from, force } => {
+            let text = match (text, from) {
+                (Some(t), None) => Ok(t.replace("\\n", "\n")),
+                (None, Some(f)) => std::fs::read_to_string(&f).map(|t| t.trim_end_matches('\n').to_string()).map_err(|e| format!("{}: {e}", f.display())),
+                _ => Err("give exactly one of --text and --from".to_string()),
+            };
+            report(text.and_then(|t| tsch::edit::put(&file, &at, &t, force)).map(|m| m + "\n"))
         }
         Cmd::Spec => {
             print!("{}", include_str!("../FORMAT.md"));

@@ -16,4 +16,5 @@ Day to day:
 - `mise run test`: unit tests and the KiCad round trip.
 
 `mise tasks` lists the rest. Design notes are in [NOTES.md](NOTES.md), the
-structure in [ARCHITECTURE.md](ARCHITECTURE.md).
+structure in [ARCHITECTURE.md](ARCHITECTURE.md), and results of agents
+drawing with it in [TRIALS.md](TRIALS.md).

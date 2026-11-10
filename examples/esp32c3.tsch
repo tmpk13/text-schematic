@@ -1,0 +1,63 @@
++++
+title = "ESP32-C3 USB-C board"
+[default.R]
+footprint = "Resistor_SMD:R_0603_1608Metric"
+[default.C]
+footprint = "Capacitor_SMD:C_0603_1608Metric"
+[part.J1]
+footprint = "Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal"
+[part.U1]
+footprint = "Package_TO_SOT_SMD:SOT-23-5"
+fields = { MPN = "AP2112K-3.3TRG1", Manufacturer = "Diodes Inc" }
+[part.U2]
+footprint = "RF_Module:ESP32-C6-MINI-1"
+fields = { MPN = "ESP32-C3-MINI-1-N4", Manufacturer = "Espressif" }
+[part.D1]
+symbol = "led"
+footprint = "LED_SMD:LED_0603_1608Metric"
+[part.SW1]
+footprint = "Button_Switch_SMD:SW_Push_1P1T_NO_CK_KMR2"
+[part.J2]
+value = "Conn_01x04"
+footprint = "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
++++
+                                                                       U1
+    J1                                                                 AP2112K-3.3
+    USB_C_Receptacle                  VBUS                             AP2112K-3.3TRG1              +3V3
+    +--------------------------+       |                               +-----------------+           |
+    |                      VBUS|A4-----*---------------*-------*------1|VIN          VOUT|5----------*
+    |                          |                       |       |       |                 |           |
+    |                        D+|A6---USB_DP           === C1   +------3|EN             NC|4x        === C2
+    |                        D-|A7---USB_DN            |  1u           |       GND       |           |  1u
+    |  CC1       CC2       GND |                      GND              +-----------------+          GND
+    +--------------------------+                                               2|
+      A5|       B5|       A1|                                                   |
+        |         |         |                                                  GND
+        #  R1     #  R2    GND
+        #  5.1k   #  5.1k
+        |         |
+       GND       GND
+
+
+
+                                                    +3V3       U2                     +3V3            +3V3        +3V3
+                                                     |         ESP32-C3-MINI-1         |               |           |
+                                                     #  R3     ESP32-C3-MINI-1-N4     3|               #  R6       #  R7
+                                                     #  10k    +-------------------------------+       #  4.7k     #  4.7k
+                                                     |         |                      3V3      |       |           |
+                                                     *--------8|EN                        GPIO4|18-----*----SDA    |
+                                        +3V3         |         |                               |                   |                                     +3V3
+                                         |          === C3     |                          GPIO5|19-----------------*----SCL                               |
+                           SW1           #  R4       |  1u     |                               |                                           J2            1|
+                           SW_Push       #  10k     GND        |                               |       R5     D1                           +-------------------+
+                           +-------+     |                     |                          GPIO8|22----[==]---->|----+                      |             3V3   |
+                     +----1| BOOT  |2----*-------------------23|GPIO9                          |       1k     red   |              SDA----3|SDA                |
+                     |     +-------+                           |                           TXD0|31x                GND             SCL----4|SCL                |
+                    GND                            USB_DP----27|GPIO19                     RXD0|30x                                        |             GND   |
+                                                               |                               |                                           +-------------------+
+                                                   USB_DN----26|GPIO18                         |                                                         2|
+                                                               |                      GND      |                                                          |
+                                                               +-------------------------------+                                                         GND
+                                                                                      1|
+                                                                                       |
+                                                                                      GND

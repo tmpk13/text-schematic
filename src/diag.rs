@@ -59,8 +59,10 @@ impl Diags {
         self.items.iter().filter(|d| d.sev == sev).count()
     }
 
+    /// By position, except that a broken box outline comes first: the
+    /// findings after it in that box usually follow from it.
     pub fn sort(&mut self) {
-        self.items.sort_by(|a, b| (a.line, a.col, a.sev).cmp(&(b.line, b.col, b.sev)));
+        self.items.sort_by(|a, b| (a.code != "E102", a.line, a.col, a.sev).cmp(&(b.code != "E102", b.line, b.col, b.sev)));
     }
 
     /// Render all findings in the compiler style: location, message, the

@@ -86,8 +86,14 @@ with a column ruler.
   reference with a unit letter: `U1A`, `U1B`, ... from A without gaps. KiCad
   shows the reference the same way. Pin numbers are unique across the units;
   the header entry is `[part.U1]`.
-- Pin numbers in one box are unique. Pin electrical types default to
-  passive; set them in the header (`pins = { 1 = "power_in", VOUT = "power_out" }`).
+- Pin numbers are letters and digits (`3`, `12`, `A4`) and unique in a
+  box. Pin names may hold any characters (`D+`, `~RST`). Pin electrical
+  types default to passive; set them in the header
+  (`pins = { 1 = "power_in", VOUT = "power_out" }`). ERC's "power input not
+  driven" rule is switched off in the generated project, so power_in pins
+  need no PWR_FLAG.
+- `x` marks an unused pin only on a pin tip, standing alone. Inside a word
+  (`Conn_01x04`) it is a letter.
 
 ## Two-pin glyphs
 
@@ -136,7 +142,9 @@ Lines are read top to bottom, then left to right. The first is the
 reference (`R1`, `U3`, `LED2`: capital letters then digits, plus a unit
 letter on a box drawn as one of several units, `U1B`), the second the
 value, the rest are named by the part's `visible = [...]` list (default
-`["MPN"]`). Every part needs a drawn reference. A line next to two parts is
+`["MPN"]`). Every part needs a drawn reference. A value or field that is
+also in the header must match it; one that is only in the header is
+hidden on the sheet. A line next to two parts is
 an error; a reference goes to a glyph whose letter matches (R, C, L, D...)
 before a box. Usual places:
 
@@ -157,7 +165,9 @@ before a box. Usual places:
 - Global label: `---[SDA]` or `[SDA]---`. Connects across sheets. Drawn as
   a flag around the name.
 - Power port: a name directly above a vertical wire end (supply,
-  `+3V3` over `|`) or directly below one (ground, `GND` under `|`). Ground
+  `+3V3` over `|`) or directly below one (ground, `GND` under `|`); any one
+  character of the name may sit over the wire, and only one wire end may
+  touch the name. Ground
   names (GND, AGND, VSS...) get the ground symbol. Port names must look like
   rails (GND*, VSS*, +3V3, 5V, 1V8, VCC*, VDD*, VBUS, VIN, ...) or be listed
   in the header `power = ["VMAIN"]`. Ports connect across sheets.
@@ -214,6 +224,10 @@ tsch show FILE --lines A:B --cols A:B   print with a column ruler
 tsch render FILE -o out              PNG of each sheet
 tsch box --ref U1 --value X --left "1:VIN=+5V,2:EN" --right "5:VOUT=[V3]" --top ... --bottom "3:GND=GND"
                                      print an aligned box to paste (pins NUM:NAME=NET)
+tsch tokens FILE --lines A:B         each run of characters with its first column
+tsch shift FILE --lines A:B --col C --by N   insert N spaces at column C (negative: delete spaces)
+tsch put FILE --at LINE:COL --text "R1\n10k" | --from snippet.txt
+                                     write text there; spaces in it leave the drawing alone
 ```
 
 `verify` passes when KiCad's exported netlist equals the drawn one, ERC has
@@ -226,7 +240,12 @@ typed in with no text overlapping another and no line crossing a text.
    at the bottom. Leave blank columns and rows between blocks; a sheet is
    cheap to make wider (A4 holds about 210 columns by 72 rows).
 2. Draw boxes first (`tsch box` prints large ones aligned), then glyphs,
-   wires, labels and power ports, then fields.
-3. Run `tsch check` and fix what it reports; each message names the cell.
-4. Read `tsch netlist` against the intended circuit.
-5. Run `tsch verify`; look at `tsch render` output for layout.
+   wires, labels and power ports, then fields. Do not type long runs of
+   spaces by hand: write each block as a small snippet and place it with
+   `tsch put --at LINE:COL`, and fix a column with `tsch shift`.
+3. If `check` reports E102 (broken box outline), fix that first: the
+   errors after it in that box usually follow from it.
+4. Run `tsch check` and fix what it reports; each message names the cell.
+   `tsch tokens` shows where every piece of a line starts.
+5. Read `tsch netlist` against the intended circuit.
+6. Run `tsch verify`; look at `tsch render` output for layout.

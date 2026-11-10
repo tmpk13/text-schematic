@@ -427,3 +427,34 @@ fn unit_letters_only_on_boxes() {
 ";
     assert!(codes(t).contains(&"E163"), "{:?}", codes(t));
 }
+
+#[test]
+fn x_inside_a_value_above_a_box_is_a_letter() {
+    let t = r"
+ J2               +3V3
+ Conn_01x04       1|
+ +----------------------+
+ |                3V3   |
+ |                   GND|2--+
+ +----------------------+   |
+                           GND
+";
+    let (s, d) = parse_text(&g(t));
+    assert!(!d.has_errors(), "{:#?}", d.items);
+    assert_eq!(s.parts[0].value(), "Conn_01x04");
+}
+
+#[test]
+fn broken_box_is_reported_first_with_few_followers() {
+    let t = r"
+     U1
+     X
+     +-----+
+[A]-1|A    |
+[B]-2|B     |
+     +-----+
+";
+    let (_, d) = parse_text(&g(t));
+    assert_eq!(d.items[0].code, "E102", "{:#?}", d.items);
+    assert!(d.items.len() <= 4, "{:#?}", d.items);
+}

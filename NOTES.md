@@ -81,9 +81,14 @@ are from kicad-cli 10.0.8 plots.
   reaches more than one part; values like `SS14` or `LM358` look like
   references, so they cannot be used as an attachment filter on their own.
 - One mistake, one error: a misplaced `x` on a box pin used to produce
-  three errors; a failed box outline produced dozens. Box pins now report
-  the most specific problem only, and a top edge with a matching bottom
-  edge but a broken side reports `E102` at the broken cell.
+  three errors; a broken box outline produced 79 in the first trial
+  (TRIALS.md). Box pins now report the most specific problem only. A top
+  edge with a matching bottom edge but a broken side reports `E102` at the
+  broken cell, sorts it first, and parses the box as closed.
+- Top and bottom pins are found by a `|` or `x` in the row just outside the
+  edge, which is also where a value line sits. An `x` there counts only
+  standing alone with an alphanumeric pin number after a space; otherwise
+  `Conn_01x04` above a box became an unused pin.
 
 ## Tooling
 
