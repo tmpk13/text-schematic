@@ -1,0 +1,21 @@
++++
+title = "3.3 V LDO"
+
+[part.U1]
+footprint = "Package_TO_SOT_SMD:SOT-223-3_TabPin2"
+datasheet = "https://www.advanced-monolithic.com/pdf/ds1117.pdf"
+pins = { 1 = "power_in", 2 = "power_out", 3 = "power_in" }
+
+[default.C]
+footprint = "Capacitor_SMD:C_0805_2012Metric"
++++
+        U1
+        AMS1117-3.3
+ +5V    +-----------+           +3V3
+  |     |           |            |
+  *----3|VIN    VOUT|2-----------*
+  |     |    GND    |            |
+  |     +-----------+            |
+ ===  C1     1|                 ===  C2
+  |   10u     |                  |   10u
+ GND         GND                GND
