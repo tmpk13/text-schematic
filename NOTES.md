@@ -72,6 +72,11 @@ are from kicad-cli 10.0.8 plots.
   pin stub rows count, but only when nothing touches more directly. A value
   line aligned under another part's field is an error, because the first
   version silently gave it to the neighbor.
+- Label scope, measured against KiCad's netlist: on one sheet a local
+  label joins a global label or power port of the same name (KiCad warns
+  `same_local_global_label`); a local label never joins a name that exists
+  only on another sheet. The first netlist model kept local and global
+  apart, and `verify` caught the mismatch.
 - Ties between parts are broken by the reference letter only when a line
   reaches more than one part; values like `SS14` or `LM358` look like
   references, so they cannot be used as an attachment filter on their own.

@@ -1,6 +1,7 @@
 //! tsch: text schematics to KiCad. A drawing is a grid of characters; each
 //! character is one 1.27 mm wide, 2.54 mm tall cell of the KiCad sheet.
 
+pub mod boxgen;
 pub mod diag;
 pub mod glyphs;
 pub mod kicad;

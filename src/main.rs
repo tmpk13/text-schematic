@@ -59,6 +59,24 @@ enum Cmd {
         #[arg(long, default_value_t = 8.0)]
         scale: f64,
     },
+    /// Print an aligned box for an IC or connector. Pins are NUM, NUM:NAME
+    /// or NUM:NAME=NET, comma separated; a net on the left or right becomes
+    /// a label ([NET] global), on the top or bottom a power port; no net
+    /// marks the pin unused (x).
+    Box {
+        #[arg(long = "ref")]
+        reference: String,
+        #[arg(long)]
+        value: String,
+        #[arg(long, default_value = "")]
+        left: String,
+        #[arg(long, default_value = "")]
+        right: String,
+        #[arg(long, default_value = "")]
+        top: String,
+        #[arg(long, default_value = "")]
+        bottom: String,
+    },
     /// Print the text schematic format specification.
     Spec,
 }
@@ -178,6 +196,21 @@ fn main() -> ExitCode {
             },
             Err(c) => c,
         },
+        Cmd::Box { reference, value, left, right, top, bottom } => {
+            let lists = [&left, &right, &top, &bottom].map(|s| tsch::boxgen::parse_list(s));
+            match lists {
+                [Ok(l), Ok(r), Ok(t), Ok(b)] => {
+                    print!("{}", tsch::boxgen::generate(&reference, &value, &l, &r, &t, &b));
+                    ExitCode::SUCCESS
+                }
+                other => {
+                    for e in other.into_iter().filter_map(|x| x.err()) {
+                        eprintln!("error: {e}");
+                    }
+                    ExitCode::from(2)
+                }
+            }
+        }
         Cmd::Spec => {
             print!("{}", include_str!("../FORMAT.md"));
             ExitCode::SUCCESS

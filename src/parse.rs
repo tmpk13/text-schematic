@@ -1106,7 +1106,13 @@ impl<'a> Parser<'a> {
                 let dr = if nr < t { t - nr - 1 } else if nr > b { nr - b - 1 } else { 0 };
                 let end = nc + n.text.len() as i32 - 1;
                 let dc = if end < l { l - end - 1 } else if nc > r { nc - r - 1 } else { 0 };
-                format!("'{}' at {} is {dr} blank row(s) and {dc} blank column(s) away; {base}", n.text, self.pos(n.at))
+                let rows_overlap = nr >= t && nr <= b;
+                let cols_overlap = nc <= r && end >= l;
+                if !rows_overlap && !cols_overlap && dr == 0 && dc <= 2 {
+                    format!("'{}' at {} is diagonal to the part: a line above or below a part must share at least one column with it; {base}", n.text, self.pos(n.at))
+                } else {
+                    format!("'{}' at {} is {dr} blank row(s) and {dc} blank column(s) away; {base}", n.text, self.pos(n.at))
+                }
             }
             None => base.to_string(),
         }
@@ -1472,9 +1478,12 @@ impl<'a> Parser<'a> {
         }
         let mut by_name: HashMap<(bool, String), usize> = HashMap::new();
         let mut names_at: Vec<(usize, String, bool)> = Vec::new();
+        // On one sheet every label and power port of a name is one net:
+        // KiCad joins a local label to a global label or power port of the
+        // same name on its sheet (it warns, same_local_global_label).
         for l in &self.labels {
             let n = node(l.anchor, l.side, &mut ids, &mut uf);
-            let key = (l.global, l.name.clone());
+            let key = (true, l.name.clone());
             match by_name.get(&key) {
                 Some(&m) => union(&mut uf, n, m),
                 None => {
@@ -1528,7 +1537,14 @@ impl<'a> Parser<'a> {
             *local_count.entry(l.name.clone()).or_default() += 1;
         }
         let labels = self.labels.clone();
+        let global_names: std::collections::HashSet<String> =
+            labels.iter().filter(|l| l.global).map(|l| l.name.clone()).chain(self.ports.iter().map(|p| p.name.clone())).collect();
         for l in labels.iter().filter(|l| !l.global) {
+            if global_names.contains(&l.name) {
+                self.warn("W177", l.text_at, format!("local label '{}' has the name of a global label or power port on this sheet; KiCad joins them", l.name))
+                    .note(format!("write it as [{}] (or a power port) so the net is drawn one way", l.name));
+                continue;
+            }
             if local_count[&l.name] == 1 {
                 self.warn("W175", l.text_at, format!("label '{}' appears only once on this sheet", l.name))
                     .note("a local label connects only to labels of the same name on the same sheet; use [NAME] for a net that continues on another sheet");

@@ -144,7 +144,9 @@ before a box. Usual places:
 ## Nets
 
 - Local label: text touching a wire end, `---SDA` or `SDA---`. Connects to
-  labels with the same name on the same sheet. A name ending in `-`
+  labels with the same name on the same sheet, and (as KiCad does, with a
+  warning) to a global label or power port of that name on the same sheet,
+  but never to one that is only on another sheet. A name ending in `-`
   (`USB_D-`) works only right of the wire; use a global label otherwise.
 - Global label: `---[SDA]` or `[SDA]---`. Connects across sheets. Drawn as
   a flag around the name.
@@ -204,6 +206,8 @@ tsch verify FILE -o out              build, then prove it with kicad-cli
 tsch netlist FILE                    nets as the drawing defines them
 tsch show FILE --lines A:B --cols A:B   print with a column ruler
 tsch render FILE -o out              PNG of each sheet
+tsch box --ref U1 --value X --left "1:VIN=+5V,2:EN" --right "5:VOUT=[V3]" --top ... --bottom "3:GND=GND"
+                                     print an aligned box to paste (pins NUM:NAME=NET)
 ```
 
 `verify` passes when KiCad's exported netlist equals the drawn one, ERC has
@@ -215,8 +219,8 @@ typed in with no text overlapping another and no line crossing a text.
 1. Plan the page: signal flow left to right, supplies at the top, grounds
    at the bottom. Leave blank columns and rows between blocks; a sheet is
    cheap to make wider (A4 holds about 210 columns by 72 rows).
-2. Draw boxes first, then glyphs, wires, labels and power ports, then
-   fields.
+2. Draw boxes first (`tsch box` prints large ones aligned), then glyphs,
+   wires, labels and power ports, then fields.
 3. Run `tsch check` and fix what it reports; each message names the cell.
 4. Read `tsch netlist` against the intended circuit.
 5. Run `tsch verify`; look at `tsch render` output for layout.
