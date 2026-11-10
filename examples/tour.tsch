@@ -1,0 +1,58 @@
++++
+title = "Feature tour"
+power = ["VBUS"]
+
+[part.U1]
+footprint = "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"
+pins = { VCC = "power_in", GND = "power_in" }
+
+[part.R1]
+fields = { MPN = "RC0603FR-07330RL" }
+
+[part.D1]
+symbol = "led"
+
+[part.D3]
+symbol = "zener"
+
+[default.R]
+footprint = "Resistor_SMD:R_0603_1608Metric"
++++
+                                +3V3
+                      U1         |
+                      ATtiny85  8|
+                      +-----------------+
+             [MOSI]--1|PB5     VCC   PB0|5--[SCK]
+             SDA-----2|PB3           PB1|6x
+                    x3|PB4           PB2|7-------SCL
+                      |         GND     |
+                      +-----------------+
+                                4|
+                                 |
+                                GND
+
+  +3V3                     +3V3        +3V3
+   |                        |           |
+   #  R1                    #  R2       #  R3
+   #  330                   #  4k7      #  4k7
+   #  RC0603FR-07330RL      |           |
+   |                        +---SDA     +---SCL
+   V  D1
+   |  RED
+  GND
+                     C3               L1
+       R4            100n             10u
+ [IN]---[===]---*---||------------*---~~~~---[OUT]
+       1k       |                 |
+               ===  C4            +   C5
+                |   1u           ===  47u
+               GND                |
+                                 GND
+
+          VBUS
+           |      D2           D3
+           *------>|------*----|<----+
+           |      SS14    |   BZX5V1 |
+          ===  C6        ===  C7     |
+           |   100n       |   10u    |
+          GND            GND        GND

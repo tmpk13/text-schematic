@@ -253,12 +253,13 @@ impl<'a> Parser<'a> {
                 while self.ch((r2, c)) == b'|' {
                     r2 += 1;
                 }
-                if self.ch((r2, c)) != b'+' || r2 < r + 2 {
-                    continue;
-                }
-                let right_ok = (r + 1..r2).all(|rr| self.ch((rr, c2)) == b'|') && self.ch((r2, c2)) == b'+';
-                let bottom_ok = (c + 1..c2).all(|cc| self.ch((r2, cc)) == b'-');
-                if !(right_ok && bottom_ok) {
+                let closed = self.ch((r2, c)) == b'+'
+                    && r2 >= r + 2
+                    && (r + 1..r2).all(|rr| self.ch((rr, c2)) == b'|')
+                    && self.ch((r2, c2)) == b'+'
+                    && (c + 1..c2).all(|cc| self.ch((r2, cc)) == b'-');
+                if !closed {
+                    self.broken_box(r, c, c2);
                     continue;
                 }
                 if (r..=r2).any(|rr| (c..=c2).any(|cc| !self.free((rr, cc)))) {
@@ -279,6 +280,28 @@ impl<'a> Parser<'a> {
                     pins: Vec::new(),
                     texts: Vec::new(),
                 });
+            }
+        }
+    }
+
+    /// A top edge `+---+` with a matching bottom edge further down whose
+    /// sides do not line up: report the first cell of the broken side,
+    /// instead of the many wire and text errors the loose pieces cause.
+    fn broken_box(&mut self, r: i32, c: i32, c2: i32) {
+        let h = self.g.height() as i32;
+        let bottom = (r + 2..h.min(r + 80)).find(|&rr| {
+            self.ch((rr, c)) == b'+' && self.ch((rr, c2)) == b'+' && (c + 1..c2).all(|cc| self.ch((rr, cc)) == b'-')
+        });
+        let Some(r2) = bottom else { return };
+        for rr in r + 1..r2 {
+            for cc in [c, c2] {
+                if self.ch((rr, cc)) != b'|' {
+                    let side = if cc == c { "left" } else { "right" };
+                    let got = self.ch((rr, cc)) as char;
+                    let hint = format!("the corners are at {} and {}; every row between them needs '|' in both corner columns", self.pos((r, c)), self.pos((r2, c2)));
+                    self.err("E102", (rr, cc), format!("box outline broken: expected the {side} side '|' here, found '{got}'")).note(hint);
+                    return;
+                }
             }
         }
     }
@@ -339,15 +362,28 @@ impl<'a> Parser<'a> {
             let number = self.text_of(&cells);
             let n = cells.len() as i32;
             let tip = (rr, if dir == Dir::L { edge - plen } else { edge + plen });
-            // Padding between the number and the tip.
+            // One error per pin, the most specific first: a misplaced x,
+            // then missing padding, then an unconnected tip.
             let mut ok = true;
-            for k in n + 1..plen {
-                let c = (rr, if dir == Dir::L { edge - k } else { edge + k });
-                if self.ch(c) != b'-' || !self.free(c) {
-                    self.err("E111", c, format!("pin {number}: expected '-' here; pins of this box are {plen} cells long (longest number + 1)"))
-                        .note(format!("pad short pin numbers with '-' toward the tip, e.g. {}", if dir == Dir::L { format!("--{}|", "1") } else { "|1--".to_string() }));
+            if let Some(x) = nc {
+                if x != tip {
+                    let eg = if dir == Dir::L { format!("x{}{number}|", "-".repeat((plen - n - 1) as usize)) } else { format!("|{number}{}x", "-".repeat((plen - n - 1) as usize)) };
+                    self.err("E112", x, format!("pin {number}: the x must sit on the pin tip, {plen} cells from the box edge (pins of this box are its longest number + 1 long)"))
+                        .note(format!("pad with '-' between the number and the x: {eg}"));
                     ok = false;
-                    break;
+                }
+            }
+            if ok {
+                for k in n + 1..plen {
+                    let c = (rr, if dir == Dir::L { edge - k } else { edge + k });
+                    if self.ch(c) != b'-' || !self.free(c) {
+                        let pad = "-".repeat((plen - n - 1) as usize);
+                        let eg = if dir == Dir::L { format!("-{pad}{number}|") } else { format!("|{number}{pad}-") };
+                        self.err("E111", c, format!("pin {number}: expected '-' here; pins of this box are {plen} cells long (longest number + 1)"))
+                            .note(format!("pad short pin numbers with '-' toward the tip: {eg}"));
+                        ok = false;
+                        break;
+                    }
                 }
             }
             for &c in &cells {
@@ -355,21 +391,32 @@ impl<'a> Parser<'a> {
             }
             for k in n + 1..plen {
                 let c = (rr, if dir == Dir::L { edge - k } else { edge + k });
-                if self.free(c) {
+                if self.free(c) && self.ch(c) == b'-' {
                     self.set(c, Own::PinText(bi));
-                }
-            }
-            if let Some(x) = nc {
-                if x != tip {
-                    self.err("E112", x, format!("pin {number}: the x must sit on the pin tip, {plen} cells from the box edge"))
-                        .note("pad with '-' between the number and the x, e.g. x-1|");
-                    ok = false;
                 }
             }
             let tch = self.ch(tip);
             if ok && !(tch == b'x' || (WIRE_CHARS.contains(&tch) && tch != b'|')) {
                 self.err("E113", tip, format!("pin {number} is not connected: its tip ({plen} cells from the edge) holds '{}'", tch as char))
                     .note("continue a wire from the tip, or put x on the tip to mark the pin unused");
+                ok = false;
+            }
+            if !ok {
+                // Keep the pin on the part but leave its tip alone, so the
+                // wire checks do not report the same mistake again.
+                if let Some(x) = nc {
+                    self.set(x, Own::PinText(bi));
+                }
+                self.bodies[bi].pins.push(PinDef {
+                    number: number.clone(),
+                    name: String::new(),
+                    tip,
+                    dir,
+                    length: plen as f64 * CELL_W,
+                    etype: String::new(),
+                });
+                self.bodies[bi].texts.push(SymText { text: number, row: rr, col: cells[0].1, kind: TextKind::PinNumberRaised });
+                continue;
             }
             let pin_idx = self.bodies[bi].pins.len();
             self.bodies[bi].pins.push(PinDef {
@@ -714,28 +761,72 @@ impl<'a> Parser<'a> {
                     continue; // all wire characters, checked later
                 }
                 let is_w = |x: u8| x == b'-' || x == b'+' || x == b'*';
-                // Prefix: leading wire characters, ending in '-'.
-                let lead = s.iter().take_while(|&&x| is_w(x)).count();
-                let mut k = lead;
-                while k > 0 && s[k - 1] != b'-' {
-                    k -= 1;
+                let n = s.len();
+                let mut wire = vec![false; n];
+                let mut i = 0;
+                while i < n {
+                    if !is_w(s[i]) {
+                        i += 1;
+                        continue;
+                    }
+                    let i0 = i;
+                    while i < n && is_w(s[i]) {
+                        i += 1;
+                    }
+                    let i1 = i - 1;
+                    if i0 == 0 && i1 == n - 1 {
+                        continue; // cannot happen: the run has a letter or digit
+                    }
+                    if i0 == 0 {
+                        // Prefix: leading wire characters ending in '-'. A lone
+                        // minus with nothing before it is text ("-5V").
+                        let mut k = i1 + 1;
+                        while k > 0 && s[k - 1] != b'-' {
+                            k -= 1;
+                        }
+                        if !(k == 1 && self.ch((r, a - 1)) == b' ') {
+                            wire[..k].iter_mut().for_each(|x| *x = true);
+                        }
+                    } else if i1 == n - 1 {
+                        // Suffix: trailing wire characters starting with '-'.
+                        // A lone trailing minus with nothing after it is text ("D-").
+                        let mut j = i0;
+                        while j < n && s[j] != b'-' {
+                            j += 1;
+                        }
+                        if !(n - j == 1 && self.ch((r, b + 1)) == b' ') {
+                            wire[j..].iter_mut().for_each(|x| *x = true);
+                        }
+                    } else {
+                        // Inside a run: two or more dashes, or a dash against a
+                        // global label bracket, is a wire between two texts.
+                        let dashes = s[i0] == b'-' && s[i1] == b'-';
+                        let bracket = s[i0 - 1] == b']' || s[i1 + 1] == b'[';
+                        if dashes && (i1 > i0 || bracket) {
+                            wire[i0..=i1].iter_mut().for_each(|x| *x = true);
+                        }
+                    }
                 }
-                if k == 1 && self.ch((r, a - 1)) == b' ' {
-                    k = 0; // "-5V": a leading minus with nothing before it is text
+                let mut i = 0;
+                while i < n {
+                    if wire[i] {
+                        i += 1;
+                        continue;
+                    }
+                    let i0 = i;
+                    while i < n && !wire[i] {
+                        i += 1;
+                    }
+                    let i1 = i - 1;
+                    let left_wire = if i0 > 0 { Some((r, a + i0 as i32 - 1)) } else { None };
+                    let right_wire = if i1 + 1 < n { Some((r, a + i1 as i32 + 1)) } else { None };
+                    let text = String::from_utf8_lossy(&s[i0..=i1]).to_string();
+                    if !has_alnum(text.as_bytes()) {
+                        // Punctuation between wires: left for the wire checks.
+                        continue;
+                    }
+                    words.push((a + i0 as i32, a + i1 as i32, text, left_wire, right_wire));
                 }
-                // Suffix: trailing wire characters, starting with '-'.
-                let trail = s.iter().rev().take_while(|&&x| is_w(x)).count();
-                let mut j = s.len() - trail;
-                while j < s.len() && s[j] != b'-' {
-                    j += 1;
-                }
-                if s.len() - j == 1 && self.ch((r, b + 1)) == b' ' {
-                    j = s.len(); // "D-": a trailing minus with nothing after it is text
-                }
-                let left_wire = if k > 0 { Some((r, a + k as i32 - 1)) } else { None };
-                let right_wire = if j < s.len() { Some((r, a + j as i32)) } else { None };
-                let text = String::from_utf8_lossy(&s[k..j]).to_string();
-                words.push((a + k as i32, a + j as i32 - 1, text, left_wire, right_wire));
             }
             // Join words separated by a single space into one phrase.
             let mut i = 0;
@@ -864,95 +955,160 @@ impl<'a> Parser<'a> {
 
     // --------------------------------------------------------------- fields
 
+    /// Fields: each text line goes to the part it sits beside (sharing a
+    /// row, at most 2 blank columns away) or directly above or below
+    /// (sharing a column, in the adjacent row). Lines that reach no part
+    /// join a left-aligned stack whose neighbor line already belongs to one.
     fn attach_fields(&mut self, cands: Vec<usize>) {
-        // Blocks: phrases on adjacent rows whose columns overlap.
-        let n = cands.len();
-        let mut parent: Vec<usize> = (0..n).collect();
-        fn find(p: &mut Vec<usize>, x: usize) -> usize {
-            let mut x = x;
-            while p[x] != x {
-                p[x] = p[p[x]];
-                x = p[x];
-            }
-            x
-        }
-        for i in 0..n {
-            for j in i + 1..n {
-                let (a, b) = (&self.phrases[cands[i]], &self.phrases[cands[j]]);
-                if (a.row - b.row).abs() == 1 && a.c0 <= b.c1 && b.c0 <= a.c1 {
-                    let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
-                    parent[ri] = rj;
-                }
-            }
-        }
-        let mut blocks: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-        for i in 0..n {
-            let root = find(&mut parent, i);
-            blocks.entry(root).or_default().push(cands[i]);
-        }
         let gap = |a0: i32, a1: i32, b0: i32, b1: i32| -> i32 {
             if a1 < b0 {
                 b0 - a1 - 1
             } else if b1 < a0 {
                 a0 - b1 - 1
             } else {
-                0
+                -1
             }
         };
-        let mut attached: Vec<Vec<usize>> = vec![Vec::new(); self.bodies.len()];
-        for (_, members) in blocks {
-            let r0 = members.iter().map(|&i| self.phrases[i].row).min().unwrap();
-            let r1 = members.iter().map(|&i| self.phrases[i].row).max().unwrap();
-            let c0 = members.iter().map(|&i| self.phrases[i].c0).min().unwrap();
-            let c1 = members.iter().map(|&i| self.phrases[i].c1).max().unwrap();
+        let mut owner: BTreeMap<usize, usize> = BTreeMap::new();
+        let mut orphans: Vec<usize> = Vec::new();
+        for &pi in &cands {
+            let p = self.phrases[pi].clone();
             let near: Vec<usize> = (0..self.bodies.len())
                 .filter(|&bi| {
-                    let (t, l, b, r) = self.bodies[bi].bbox;
-                    gap(r0, r1, t, b) <= 1 && gap(c0, c1, l, r) <= 2
+                    let (mut t, l, mut b, r) = self.bodies[bi].bbox;
+                    // Beside a vertical glyph, its pin stub rows count too.
+                    if let BodyKind::Glyph(f) = self.bodies[bi].kind {
+                        if f.vertical() {
+                            t -= 1;
+                            b += 1;
+                        }
+                    }
+                    let gr = gap(p.row, p.row, t, b);
+                    let gc = gap(p.c0, p.c1, l, r);
+                    (gr < 0 && gc <= 2) || (gc < 0 && gr == 0)
                 })
                 .collect();
-            let mut first = members.clone();
-            first.sort_by_key(|&i| (self.phrases[i].row, self.phrases[i].c0));
-            let head = &self.phrases[first[0]];
-            let head_cell = (head.row, head.c0);
-            let head_text = head.text.clone();
-            // A block headed by a reference goes only to a part that takes
-            // that reference; a glyph whose letter matches wins over a box.
-            let mut cands = near.clone();
-            if is_reference(&head_text) {
-                cands.retain(|&bi| self.accepts(bi, &head_text));
-                if cands.iter().any(|&bi| matches!(self.bodies[bi].kind, BodyKind::Glyph(_))) {
-                    cands.retain(|&bi| matches!(self.bodies[bi].kind, BodyKind::Glyph(_)));
+            let mut cands_b = near.clone();
+            // A reference goes to a part that takes its letter; a glyph of
+            // that kind wins over a box.
+            if cands_b.len() > 1 && is_reference(&p.text) {
+                cands_b.retain(|&bi| self.accepts(bi, &p.text));
+                if cands_b.iter().any(|&bi| matches!(self.bodies[bi].kind, BodyKind::Glyph(_))) {
+                    cands_b.retain(|&bi| matches!(self.bodies[bi].kind, BodyKind::Glyph(_)));
                 }
             }
-            match cands.len() {
+            let cell = (p.row, p.c0);
+            match cands_b.len() {
+                0 if near.is_empty() => orphans.push(pi),
                 0 => {
-                    if !near.is_empty() {
-                        let names: Vec<String> = near.iter().map(|&b| self.body_desc(b)).collect();
-                        self.err("E150", head_cell, format!("reference '{head_text}' is next to {}, which takes a different letter", names.join(" and ")))
-                            .note("resistor glyphs take R/F/TH, capacitors C, inductors L/FB, diodes D/LED/TVS/ZD; boxes take any reference");
-                    } else if is_reference(&head_text) {
-                        self.warn("W150", head_cell, format!("'{head_text}' looks like a reference but is not next to any part"))
-                            .note("fields sit within 1 row and 2 columns of the part body");
-                    }
-                    for &i in &first {
-                        let p = &self.phrases[i];
-                        self.notes.push(Note { text: p.text.clone(), at: (p.row, p.c0) });
-                    }
+                    let names: Vec<String> = near.iter().map(|&b| self.body_desc(b)).collect();
+                    self.err("E150", cell, format!("reference '{}' is next to {}, which takes a different letter", p.text, names.join(" and ")))
+                        .note("resistor glyphs take R/F/TH, capacitors C, inductors L/FB, diodes D/LED/TVS/ZD; boxes take any reference");
                 }
-                1 => attached[cands[0]].extend(first),
+                1 => {
+                    owner.insert(pi, cands_b[0]);
+                }
                 _ => {
-                    let names: Vec<String> = cands.iter().map(|&b| self.body_desc(b)).collect();
-                    self.err("E151", head_cell, format!("text '{head_text}' is next to more than one part: {}", names.join(" and ")))
-                        .note("move the fields so they are within 1 row and 2 columns of only their own part");
+                    let names: Vec<String> = cands_b.iter().map(|&b| self.body_desc(b)).collect();
+                    self.err("E151", cell, format!("text '{}' is next to more than one part: {}", p.text, names.join(" and ")))
+                        .note("a field shares a row with its part (at most 2 blank columns away) or sits in the row directly above or below it, over its columns; move it clear of the other part");
                 }
             }
+        }
+        // A value line aligned directly under another part's field line
+        // reads as that part's; refuse to guess.
+        let owned: Vec<(usize, usize)> = owner.iter().map(|(&p, &b)| (p, b)).collect();
+        for &(pi, bi) in &owned {
+            let p = self.phrases[pi].clone();
+            if is_reference(&p.text) {
+                continue;
+            }
+            let above = owned.iter().find(|(qi, qb)| {
+                let q = &self.phrases[*qi];
+                q.row == p.row - 1 && q.c0 == p.c0 && *qb != bi
+            });
+            if let Some(&(qi, qb)) = above {
+                let qtext = self.phrases[qi].text.clone();
+                let (mine, theirs) = (self.body_desc(bi), self.body_desc(qb));
+                self.err("E156", (p.row, p.c0), format!("'{}' is beside {mine} but sits under '{qtext}', a field of {theirs}", p.text))
+                    .note("move it so it is next to only one part, or out of line with the other part's fields");
+                owner.remove(&pi);
+            }
+        }
+        // Stacks: an orphan directly above or below an owned line with the
+        // same first column joins that line's part.
+        loop {
+            let mut changed = false;
+            for &pi in &orphans.clone() {
+                let p = self.phrases[pi].clone();
+                let mut found: Vec<usize> = owner
+                    .iter()
+                    .filter(|(q, _)| {
+                        let q = &self.phrases[**q];
+                        (q.row - p.row).abs() == 1 && q.c0 == p.c0
+                    })
+                    .map(|(_, b)| *b)
+                    .collect();
+                found.sort();
+                found.dedup();
+                if found.len() == 1 {
+                    owner.insert(pi, found[0]);
+                    orphans.retain(|&o| o != pi);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        for &pi in &orphans {
+            let p = self.phrases[pi].clone();
+            if is_reference(&p.text) {
+                self.warn("W150", (p.row, p.c0), format!("'{}' looks like a reference but is not next to any part", p.text))
+                    .note("a field shares a row with its part (at most 2 blank columns away), sits in the row directly above or below it over its columns, or stacks left-aligned on such a line");
+            }
+            self.notes.push(Note { text: p.text.clone(), at: (p.row, p.c0) });
+        }
+        let mut attached: Vec<Vec<usize>> = vec![Vec::new(); self.bodies.len()];
+        for (pi, bi) in owner {
+            attached[bi].push(pi);
         }
         self.attached = attached;
     }
 }
 
 impl<'a> Parser<'a> {
+    /// Hint for a body without fields: where they go, and the closest
+    /// stray reference if one is nearby.
+    fn nearest_ref_hint(&self, bbox: (i32, i32, i32, i32)) -> String {
+        let (t, l, b, r) = bbox;
+        let mut best: Option<(i32, &Note)> = None;
+        for n in &self.notes {
+            if !is_reference(&n.text) {
+                continue;
+            }
+            let (nr, nc) = n.at;
+            let dr = if nr < t { t - nr - 1 } else if nr > b { nr - b - 1 } else { 0 };
+            let end = nc + n.text.len() as i32 - 1;
+            let dc = if end < l { l - end - 1 } else if nc > r { nc - r - 1 } else { 0 };
+            let d = dr.max(dc);
+            if d <= 24 && best.is_none_or(|(bd, _)| d < bd) {
+                best = Some((d, n));
+            }
+        }
+        let base = "write the reference (R1, U3...) in a row of the body or the row just above or below it, at most 2 blank columns away: above a box's top-left corner, above a horizontal part, right of a vertical one";
+        match best {
+            Some((_, n)) => {
+                let (nr, nc) = n.at;
+                let dr = if nr < t { t - nr - 1 } else if nr > b { nr - b - 1 } else { 0 };
+                let end = nc + n.text.len() as i32 - 1;
+                let dc = if end < l { l - end - 1 } else if nc > r { nc - r - 1 } else { 0 };
+                format!("'{}' at {} is {dr} blank row(s) and {dc} blank column(s) away; {base}", n.text, self.pos(n.at))
+            }
+            None => base.to_string(),
+        }
+    }
+
     /// Whether a body may carry this reference: boxes take any, glyphs only
     /// the letters of their kind.
     fn accepts(&self, bi: usize, reference: &str) -> bool {
@@ -1002,8 +1158,8 @@ impl<'a> Parser<'a> {
             let ph: Vec<Phrase> = list.iter().map(|&i| self.phrases[i].clone()).collect();
             if ph.is_empty() {
                 let desc = self.body_desc(bi);
-                self.err("E152", body_cell, format!("{desc} has no reference"))
-                    .note("write the reference (R1, U3...) within 1 row and 2 columns of the body: above a box's top-left corner, above a horizontal part, right of a vertical one");
+                let hint = self.nearest_ref_hint(body.bbox);
+                self.err("E152", body_cell, format!("{desc} has no reference")).note(hint);
                 continue;
             }
             let reference = ph[0].text.clone();
@@ -1281,7 +1437,7 @@ impl<'a> Parser<'a> {
         // Connectivity: one node per wire cell, two for a crossing.
         let mut ids: HashMap<(Cell, u8), usize> = HashMap::new();
         let mut uf: Vec<usize> = Vec::new();
-        let mut node = |c: Cell, d: Dir, ids: &mut HashMap<(Cell, u8), usize>, uf: &mut Vec<usize>| -> usize {
+        let node = |c: Cell, d: Dir, ids: &mut HashMap<(Cell, u8), usize>, uf: &mut Vec<usize>| -> usize {
             let axis = if crossing(c) { if d.horizontal() { 1 } else { 2 } } else { 0 };
             *ids.entry((c, axis)).or_insert_with(|| {
                 uf.push(uf.len());

@@ -1,14 +1,4 @@
-mod diag;
-mod glyphs;
-mod kicad;
-mod meta;
-mod model;
-mod parse;
-mod project;
-mod sexpr;
-mod show;
-mod source;
-mod verify;
+use tsch::{diag, project, show, verify};
 
 use std::path::PathBuf;
 use std::process::ExitCode;

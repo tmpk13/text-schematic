@@ -1,0 +1,3 @@
+name = "usb-board"
+title = "USB to 3.3 V MCU board"
+sheets = ["power.tsch", "mcu.tsch"]

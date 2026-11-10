@@ -1,0 +1,29 @@
++++
+title = "Power and USB"
+
+[part.J1]
+footprint = "Connector_USB:USB_Micro-B_Molex-105017-0001"
+pins = { VBUS = "power_out" }
+
+[part.U1]
+footprint = "Package_TO_SOT_SMD:SOT-223-3_TabPin2"
+pins = { 1 = "power_in", 2 = "power_out", 3 = "power_in" }
+
+[part.F1]
+footprint = "Fuse:Fuse_1206_3216Metric"
+symbol = "fuse"
+
+[default.C]
+footprint = "Capacitor_SMD:C_0805_2012Metric"
++++
+  J1
+  USB_B_Micro        F1
+  +----------+       500mA                                 U1                +3V3
+  |      VBUS|1------[==]------*-----------*-----------+   AMS1117-3.3        |
+  |        D-|2--[USB_DN]      |           |           |   +-----------+      |
+  |        D+|3--[USB_DP]     ===  C1      +   C2      +--3|VIN    VOUT|2-----*
+  |        ID|4x               |   100n   ===  10u         |    GND    |     ===  C3
+  |       GND|5--+            GND          |               +-----------+      |   10u
+  +----------+   |                        GND                   1|           GND
+                GND                                              |
+                                                                GND

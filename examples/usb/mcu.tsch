@@ -1,0 +1,35 @@
++++
+title = "MCU"
+
+[part.U2]
+footprint = "Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm"
+pins = { VDD = "power_in", VSS = "power_in", DP = "bidirectional", DM = "bidirectional" }
+
+[default.C]
+footprint = "Capacitor_SMD:C_0402_1005Metric"
+
+[default.R]
+footprint = "Resistor_SMD:R_0402_1005Metric"
+
+[part.D1]
+symbol = "led"
+footprint = "LED_SMD:LED_0603_1608Metric"
++++
+                                   +3V3
+                         U2         |
+                         MCU-32    1|
+                         +--------------------+
+            [USB_DP]---12|DP       VDD     PA0|20---[==]---+
+            [USB_DN]---13|DM               PA1|21x   R1    |
+                      x-2|NRST             PA2|22x   1k    V  D1
+                         |         VSS        |            |  GRN
+                         +--------------------+           GND
+                                   16|
+                                     |
+                                    GND
+
+      +3V3
+       |
+      ===  C4
+       |   100n
+      GND
